@@ -1,0 +1,14 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/fastapi/main.py"
+    }
+  ],
+  "builds": [
+    {
+      "src": "fastapi/main.py",
+      "use": "@vercel/python"
+    }
+  ]
+}
