@@ -87,3 +87,5 @@ coverage/
 # Cache
 .cache/
 .parcel-cache/
+nextjs/app.js
+fastapi/www.instagram.com_netscape_1770962278051.txt

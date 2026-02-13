@@ -1,6 +1,6 @@
 "use client"
 import React, { useState, useTransition } from 'react';
-import { fetchVideoInfo, getStreamUrl, downloadVideo } from './actions';
+import { fetchVideoInfo, getStreamUrl, getDownloadUrl } from './actions';
 
 interface VideoInfo {
   title: string;
@@ -57,24 +57,13 @@ const DoomVideoStreamer = () => {
     setError('');
     startTransition(async () => {
       try {
-        const result = await downloadVideo(videoUrl, videoInfo?.title);
-        // Convert base64 back to blob and download
-        const byteCharacters = atob(result.base64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: result.type });
-
-        const downloadUrl = window.URL.createObjectURL(blob);
+        const downloadUrl = await getDownloadUrl(videoUrl, videoInfo?.title);
         const link = document.createElement('a');
         link.href = downloadUrl;
-        link.download = result.title;
+        link.rel = 'noopener';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        window.URL.revokeObjectURL(downloadUrl);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to download video');
       }

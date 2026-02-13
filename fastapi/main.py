@@ -5,7 +5,18 @@ import yt_dlp
 import subprocess
 import asyncio
 import httpx
+from dotenv import load_dotenv
+import os
+from typing import Optional
+import base64
+import re
 
+load_dotenv()
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+YTDLP_COOKIE_FILE = os.getenv("YTDLP_COOKIE_FILE")
+YTDLP_COOKIES_FROM_BROWSER = os.getenv("YTDLP_COOKIES_FROM_BROWSER")
+YTDLP_COOKIE_TEXT = os.getenv("YTDLP_COOKIE_TEXT")
+YTDLP_COOKIE_TEXT_B64 = os.getenv("YTDLP_COOKIE_TEXT_B64")
 app = FastAPI()
 
 # https://www.instagram.com/reel/DUdLHnvjW4P/?utm_source=ig_web_copy_link&igsh=NTc4MTIwNjQ2YQ==
@@ -13,11 +24,43 @@ app = FastAPI()
 # Enable CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def get_cookiefile_path() -> Optional[str]:
+    if YTDLP_COOKIE_TEXT_B64:
+        temp_path = "/tmp/yt_dlp_cookies.txt"
+        try:
+            decoded = base64.b64decode(YTDLP_COOKIE_TEXT_B64).decode("utf-8")
+            with open(temp_path, "w") as f:
+                f.write(decoded)
+            return temp_path
+        except Exception:
+            return None
+    if YTDLP_COOKIE_TEXT:
+        temp_path = "/tmp/yt_dlp_cookies.txt"
+        try:
+            with open(temp_path, "w") as f:
+                f.write(YTDLP_COOKIE_TEXT)
+            return temp_path
+        except Exception:
+            return None
+    if YTDLP_COOKIE_FILE and os.path.exists(YTDLP_COOKIE_FILE):
+        return YTDLP_COOKIE_FILE
+    return None
+
+def sanitize_filename(name: Optional[str]) -> str:
+    if not name:
+        return "video.mp4"
+    cleaned = re.sub(r'[^A-Za-z0-9._ -]+', '', name).strip()
+    if not cleaned:
+        return "video.mp4"
+    if not cleaned.lower().endswith(".mp4"):
+        cleaned = f"{cleaned}.mp4"
+    return cleaned[:200]
 
 def get_video_url(youtube_url: str):
     """Extract direct video URL using yt-dlp"""
@@ -25,6 +68,11 @@ def get_video_url(youtube_url: str):
         'format': 'best[ext=mp4]/best',  # Get best mp4 or best available
         'quiet': True,
     }
+    cookiefile = get_cookiefile_path()
+    if cookiefile:
+        ydl_opts['cookiefile'] = cookiefile
+    elif YTDLP_COOKIES_FROM_BROWSER:
+        ydl_opts['cookiesfrombrowser'] = (YTDLP_COOKIES_FROM_BROWSER,)
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(youtube_url, download=False)
@@ -33,11 +81,19 @@ def get_video_url(youtube_url: str):
 async def stream_video(url: str):
     # """Stream video data in chunks"""
     # Use yt-dlp to download and stream
-    process = await asyncio.create_subprocess_exec(
+    cmd = [
         'yt-dlp',
         '-f', 'best[ext=mp4]/best',
         '-o', '-',  # Output to stdout
-        url,
+    ]
+    cookiefile = get_cookiefile_path()
+    if cookiefile:
+        cmd.extend(['--cookies', cookiefile])
+    elif YTDLP_COOKIES_FROM_BROWSER:
+        cmd.extend(['--cookies-from-browser', YTDLP_COOKIES_FROM_BROWSER])
+    cmd.append(url)
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
@@ -79,6 +135,27 @@ async def stream_video_endpoint(url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error streaming video: {str(e)}")
 
+@app.get("/download")
+async def download_video_endpoint(url: str, title: Optional[str] = None):
+    """
+    Download video as attachment
+    Usage: /download?url=VIDEO_URL&title=My%20Video
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="URL parameter is required")
+    filename = sanitize_filename(title)
+    try:
+        return StreamingResponse(
+            stream_video(url),
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Accept-Ranges": "bytes",
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading video: {str(e)}")
+
 @app.get("/info")
 def get_video_info(url: str):
     """Get video information without downloading"""
@@ -89,6 +166,11 @@ def get_video_info(url: str):
         ydl_opts = {
             'quiet': True,
         }
+        cookiefile = get_cookiefile_path()
+        if cookiefile:
+            ydl_opts['cookiefile'] = cookiefile
+        elif YTDLP_COOKIES_FROM_BROWSER:
+            ydl_opts['cookiesfrombrowser'] = (YTDLP_COOKIES_FROM_BROWSER,)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)

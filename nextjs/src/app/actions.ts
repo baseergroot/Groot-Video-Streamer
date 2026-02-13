@@ -27,20 +27,14 @@ export async function getStreamUrl(url: string) {
   return `${API_URL}/stream?url=${encodeURIComponent(url)}`;
 }
 
-export async function downloadVideo(url: string, title?: string) {
+export async function getDownloadUrl(url: string, title?: string) {
   if (!url) {
     throw new Error('Missing URL.');
   }
   const API_URL = process.env.API_URL || 'http://localhost:8000';
-  const apiUrl = `${API_URL}/stream`;
-  const response = await fetch(`${apiUrl}?url=${encodeURIComponent(url)}`);
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Failed to download video.');
+  const params = new URLSearchParams({ url });
+  if (title) {
+    params.set('title', title);
   }
-  const blob = await response.blob();
-  // Convert blob to base64 for serialization
-  const arrayBuffer = await blob.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString('base64');
-  return { base64, type: blob.type, title: title ? `${title}.mp4` : 'video.mp4' };
+  return `${API_URL}/download?${params.toString()}`;
 }
